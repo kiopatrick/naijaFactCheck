@@ -624,6 +624,14 @@ textarea::placeholder {
   letter-spacing: 1.5px;
 }
 
+[hidden] { display: none !important; }
+.classifier-diagnostics { margin-bottom: 14px; border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 14px; }
+.classifier-diagnostics summary { cursor: pointer; font-weight: 600; }
+.diagnostic-note { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 12px 0; }
+.classifier-diagnostics .prob-row { margin-bottom: 0; }
+.classifier-diagnostics .prob-value { color: var(--text); font-size: 24px; }
+.ev-summary + .ev-summary { margin-top: 12px; }
+
 /* ── DETAIL CARD ────────────────────────────────────────────────────────── */
 .detail-card {
   background: var(--surface);
@@ -1229,7 +1237,7 @@ nav {
         <div class="verdict-icon-large" id="verdict-icon-large"></div>
       </div>
       <div class="conf-section">
-        <div class="conf-track">
+        <div class="conf-track" id="verdict-confidence-track" hidden>
           <div class="conf-fill" id="conf-fill" style="width:0%"></div>
         </div>
         <div class="conf-meta">
@@ -1239,17 +1247,22 @@ nav {
       </div>
     </div>
 
-    <!-- Probability cards -->
+    <!-- Classifier diagnostics are separate from the evidence verdict. -->
+    <details class="classifier-diagnostics" id="classifier-diagnostics">
+      <summary>Classifier diagnostics</summary>
+      <p class="diagnostic-note">These scores describe patterns learned from COVID-era training data. They do not determine the evidence verdict or measure whether this claim is true.</p>
     <div class="prob-row">
       <div class="prob-card real">
         <div class="prob-value" id="real-val">—</div>
-        <div class="prob-label">Real probability</div>
+        <div class="prob-label">Classifier REAL score</div>
       </div>
       <div class="prob-card fake">
         <div class="prob-value" id="fake-val">—</div>
-        <div class="prob-label">Fake probability</div>
+        <div class="prob-label">Classifier FAKE score</div>
       </div>
     </div>
+
+    </details>
 
     <!-- Details -->
     <div class="detail-card">
@@ -1343,7 +1356,7 @@ nav {
         <li>The model detects the language automatically if set to Auto</li>
         <li>XLM-RoBERTa analyses linguistic patterns across 4 languages</li>
         <li>Returns a verdict (TRUE / FALSE / UNVERIFIED) with a decision explanation</li>
-        <li>Retrieves evidence from trusted sources including Dubawa, FactCheckHub, Africa Check, Africanews, and BBC Africa</li>
+        <li>Searches public web pages, Wikipedia, and news results; checks retrieved passages against the claim</li>
         <li>Model scores describe classification behaviour; they are not calibrated truth probabilities</li>
       </ul>
     </div>
@@ -1623,26 +1636,63 @@ checkBtn.addEventListener("click", async () => {
   }
 });
 
+function evidenceVerdict(value) {
+  return ["TRUE", "FALSE", "UNVERIFIED"].includes(value) ? value : "UNVERIFIED";
+}
+
+function groupEvidence(items) {
+  const groups = new Map();
+  const rank = p => p.stance === "supports" || p.stance === "contradicts" ? 0 : 1;
+  for (const item of items || []) {
+    let url;
+    try { url = new URL(item.url); } catch { continue; }
+    if (!["https:", "http:"].includes(url.protocol)) continue;
+    url.hash = "";
+    // Remove tracking parameters while preserving meaningful page identifiers.
+    for (const name of [...url.searchParams.keys()]) {
+      if (name.startsWith("utm_") || ["fbclid", "gclid"].includes(name)) url.searchParams.delete(name);
+    }
+    url.searchParams.sort();
+    const key = url.href;
+    if (!groups.has(key)) groups.set(key, {...item, url: key, passages: []});
+    const group = groups.get(key);
+    const summary = String(item.summary || "").trim();
+    if (summary && !group.passages.some(p => p.summary === summary && p.stance === item.stance)) {
+      group.passages.push({summary, stance: item.stance});
+    }
+  }
+  for (const group of groups.values()) {
+    const stances = new Set(group.passages.map(p => p.stance));
+    group.stance = stances.has("supports") && stances.has("contradicts") ? "mixed"
+      : stances.has("supports") ? "supports" : stances.has("contradicts") ? "contradicts" : "neutral";
+    group.passages.sort((a,b) => rank(a) - rank(b));
+    // Suppress overlapping excerpts when a longer excerpt has the same assessment.
+    group.passages = group.passages.filter((p,i,all) => !all.some((q,j) =>
+      i !== j && p.stance === q.stance && q.summary.length > p.summary.length && q.summary.includes(p.summary)));
+    if (group.passages.some(p => rank(p) === 0)) group.passages = group.passages.filter(p => rank(p) === 0);
+  }
+  return [...groups.values()].sort((a,b) => (a.stance === "neutral") - (b.stance === "neutral"));
+}
+
 // ── RENDER RESULT ─────────────────────────────────────────────────────────
 function renderResult(result, text) {
-  const isFake = result.label === "FAKE";
   const conf   = result.confidence == null ? NaN : Number(result.confidence);
   const fp     = parseFloat(result.fake_prob);
   const rp     = parseFloat(result.real_prob);
   const lang   = result.language || selectedLang;
   const langDisplay = lang.charAt(0).toUpperCase() + lang.slice(1);
 
-  // Determine display verdict: hybrid pipeline uses result.verdict; fast path uses result.label
-  const displayVerdict = result.verdict || (result.label === "FAKE" ? "FALSE" : "TRUE");
+  // Only an explicit evidence verdict can establish a factual result.
+  const displayVerdict = evidenceVerdict(result.verdict);
   const isUnverified = displayVerdict === "UNVERIFIED";
   const isFakeVerdict = displayVerdict === "FALSE";
 
   // Verdict card
   const cardClass = isUnverified ? "unverified" : (isFakeVerdict ? "fake" : "real");
   verdictCard.className = `verdict-card ${cardClass}`;
-  verdictEyebrow.textContent = isUnverified ? "🟡 Cannot be verified"
-                             : isFakeVerdict  ? "⚠️ Potentially fake"
-                             : "✅ Appears credible";
+  verdictEyebrow.textContent = isUnverified ? "🟡 Evidence insufficient"
+                             : isFakeVerdict  ? "⚠️ Evidence contradicts this claim"
+                             : "✅ Evidence supports this claim";
   verdictWord.textContent    = displayVerdict;
   verdictIconLg.textContent  = isUnverified ? "🟡" : isFakeVerdict ? "🔴" : "🟢";
 
@@ -1652,9 +1702,12 @@ function renderResult(result, text) {
   confLangLabel.textContent = langDisplay;
   confPctLabel.textContent = Number.isFinite(conf) ? `${conf}% score (not calibrated)` : "Verdict probability unavailable";
 
-  // Probabilities
-  realVal.textContent = result.real_prob == null ? "—" : `${rp}% model score`;
-  fakeVal.textContent = result.fake_prob == null ? "—" : `${fp}% model score`;
+  document.getElementById("verdict-confidence-track").hidden = !Number.isFinite(conf);
+  const diagnostics = document.getElementById("classifier-diagnostics");
+  diagnostics.open = false;
+  diagnostics.hidden = !Number.isFinite(rp) && !Number.isFinite(fp);
+  realVal.textContent = Number.isFinite(rp) ? `${rp.toFixed(1)}%` : "Unavailable";
+  fakeVal.textContent = Number.isFinite(fp) ? `${fp.toFixed(1)}%` : "Unavailable";
 
   // Details
   resultLang.textContent = langDisplay;
@@ -1693,8 +1746,9 @@ function renderResult(result, text) {
 
   if (result.evidence && result.evidence.length > 0) {
     evidenceList.innerHTML = "";
-    result.evidence.forEach(ev => {
-      const stanceLabel = ev.stance === "contradicts"  ? "Contradicts"
+    groupEvidence(result.evidence).forEach(ev => {
+      const stanceLabel = ev.stance === "mixed" ? "Conflicting passages"
+                        : ev.stance === "contradicts"  ? "Contradicts"
                         : ev.stance === "supports"     ? "Supports"
                         : ev.stance === "soft_support" ? "Related coverage"
                         : "Neutral";
@@ -1706,7 +1760,7 @@ function renderResult(result, text) {
           <span class="ev-stance ${ev.stance}">${stanceLabel}</span>
         </div>
         ${ev.title ? `<div class="ev-title">${escapeHTML(ev.title)}</div>` : ""}
-        <div class="ev-summary">${escapeHTML(ev.summary)}</div>
+        ${ev.passages.map(p => `<div class="ev-summary"><strong>${p.stance === "supports" ? "Supporting passage" : p.stance === "contradicts" ? "Contradicting passage" : "Related passage"}</strong><br>${escapeHTML(p.summary)}</div>`).join("")}
         <div class="ev-footer">
           ${ev.published_date ? `<span class="ev-date">🗓 ${escapeHTML(ev.published_date.slice(0,10))}</span>` : ""}
           ${ev.url ? `<a class="ev-link" href="${escapeHTML(ev.url)}" target="_blank" rel="noopener noreferrer">🔗 Read article</a>` : ""}
@@ -1741,7 +1795,7 @@ function escapeHTML(str) {
 shareBtn.addEventListener("click", async () => {
   if (!lastResult) return;
   const { verdict: rawVerdict, label, confidence, language, text } = lastResult;
-  const displayV = rawVerdict || (label === "FAKE" ? "FALSE" : "TRUE");
+  const displayV = evidenceVerdict(rawVerdict);
   const verdict = displayV === "FALSE" ? "🔴 FALSE"
                 : displayV === "UNVERIFIED" ? "🟡 UNVERIFIED"
                 : "🟢 TRUE";
