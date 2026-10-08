@@ -1236,33 +1236,7 @@ nav {
         </div>
         <div class="verdict-icon-large" id="verdict-icon-large"></div>
       </div>
-      <div class="conf-section">
-        <div class="conf-track" id="verdict-confidence-track" hidden>
-          <div class="conf-fill" id="conf-fill" style="width:0%"></div>
-        </div>
-        <div class="conf-meta">
-          <span id="conf-lang-label">—</span>
-          <span id="conf-pct-label">—% confidence</span>
-        </div>
-      </div>
     </div>
-
-    <!-- Classifier diagnostics are separate from the evidence verdict. -->
-    <details class="classifier-diagnostics" id="classifier-diagnostics">
-      <summary>Classifier diagnostics</summary>
-      <p class="diagnostic-note">These scores describe patterns learned from COVID-era training data. They do not determine the evidence verdict or measure whether this claim is true.</p>
-    <div class="prob-row">
-      <div class="prob-card real">
-        <div class="prob-value" id="real-val">—</div>
-        <div class="prob-label">Classifier REAL score</div>
-      </div>
-      <div class="prob-card fake">
-        <div class="prob-value" id="fake-val">—</div>
-        <div class="prob-label">Classifier FAKE score</div>
-      </div>
-    </div>
-
-    </details>
 
     <!-- Details -->
     <div class="detail-card">
@@ -1271,12 +1245,8 @@ nav {
         <span class="detail-val" id="result-lang">—</span>
       </div>
       <div class="detail-row">
-        <span class="detail-key">Model</span>
-        <span class="detail-val">XLM-RoBERTa + LoRA</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-key">Training data</span>
-        <span class="detail-val">Constraint@AAAI2021 · NLLB-200</span>
+        <span class="detail-key">Verification</span>
+        <span class="detail-val" id="verification-method">Evidence assessment</span>
       </div>
     </div>
 
@@ -1514,11 +1484,6 @@ const verdictCard     = document.getElementById("verdict-card");
 const verdictEyebrow  = document.getElementById("verdict-eyebrow");
 const verdictWord     = document.getElementById("verdict-word");
 const verdictIconLg   = document.getElementById("verdict-icon-large");
-const confFill        = document.getElementById("conf-fill");
-const confLangLabel   = document.getElementById("conf-lang-label");
-const confPctLabel    = document.getElementById("conf-pct-label");
-const realVal         = document.getElementById("real-val");
-const fakeVal         = document.getElementById("fake-val");
 const resultLang      = document.getElementById("result-lang");
 const resultPreview   = document.getElementById("result-preview");
 const shareBtn        = document.getElementById("share-btn");
@@ -1676,9 +1641,6 @@ function groupEvidence(items) {
 
 // ── RENDER RESULT ─────────────────────────────────────────────────────────
 function renderResult(result, text) {
-  const conf   = result.confidence == null ? NaN : Number(result.confidence);
-  const fp     = parseFloat(result.fake_prob);
-  const rp     = parseFloat(result.real_prob);
   const lang   = result.language || selectedLang;
   const langDisplay = lang.charAt(0).toUpperCase() + lang.slice(1);
 
@@ -1696,21 +1658,9 @@ function renderResult(result, text) {
   verdictWord.textContent    = displayVerdict;
   verdictIconLg.textContent  = isUnverified ? "🟡" : isFakeVerdict ? "🔴" : "🟢";
 
-  // Confidence bar
-  confFill.style.width = "0%";
-  setTimeout(() => { confFill.style.width = Number.isFinite(conf) ? `${conf}%` : "0%"; }, 80);
-  confLangLabel.textContent = langDisplay;
-  confPctLabel.textContent = Number.isFinite(conf) ? `${conf}% score (not calibrated)` : "Verdict probability unavailable";
-
-  document.getElementById("verdict-confidence-track").hidden = !Number.isFinite(conf);
-  const diagnostics = document.getElementById("classifier-diagnostics");
-  diagnostics.open = false;
-  diagnostics.hidden = !Number.isFinite(rp) && !Number.isFinite(fp);
-  realVal.textContent = Number.isFinite(rp) ? `${rp.toFixed(1)}%` : "Unavailable";
-  fakeVal.textContent = Number.isFinite(fp) ? `${fp.toFixed(1)}%` : "Unavailable";
-
   // Details
   resultLang.textContent = langDisplay;
+  document.getElementById("verification-method").textContent = result.method === "knowledge_base" ? "Reviewed factual reference" : "Retrieved passages and local NLI";
 
   // Preview
   resultPreview.textContent = text.length > 220 ? text.slice(0, 220) + "…" : text;
@@ -1737,7 +1687,7 @@ function renderResult(result, text) {
   // Decision explanation is always visible.
   let reasonNode = document.getElementById("decision-reason");
   if (!reasonNode) { reasonNode = document.createElement("p"); reasonNode.id = "decision-reason"; verdictCard.appendChild(reasonNode); }
-  reasonNode.textContent = result.reason || "No decision explanation supplied.";
+  reasonNode.textContent = (result.reason || "No decision explanation supplied.").replace(/\s*Classifier scores are not probabilities that a claim is true or false\./g, "").replace(/\s*The classifier score is not a probability that the claim is true or false\./g, "");
 
   // Evidence cards
   const evidenceSection = document.getElementById("evidence-section");
@@ -1799,7 +1749,7 @@ shareBtn.addEventListener("click", async () => {
   const verdict = displayV === "FALSE" ? "🔴 FALSE"
                 : displayV === "UNVERIFIED" ? "🟡 UNVERIFIED"
                 : "🟢 TRUE";
-  const msg = `NaijaFactCheck Result\n${verdict}${confidence == null ? "" : ", " + confidence + "% score (not calibrated)"}\nLanguage: ${(language||"").toUpperCase()}\n\n"${(text||"").slice(0, 120)}…"\n\nCheck news yourself: ${window.location.href}`;
+  const msg = `NaijaFactCheck Result\n${verdict}\nLanguage: ${(language||"").toUpperCase()}\n\n"${(text||"").slice(0, 120)}…"\n\nCheck news yourself: ${window.location.href}`;
   try {
     if (navigator.share) {
       await navigator.share({ title: "NaijaFactCheck", text: msg });
@@ -1815,7 +1765,6 @@ checkAnotherBtn.addEventListener("click", () => {
   textInput.value = "";
   charCount.textContent = "0 / 2000";
   checkBtn.disabled = true;
-  confFill.style.width = "0%";
   showScreen("home");
   setTimeout(() => textInput.focus(), 300);
 });
