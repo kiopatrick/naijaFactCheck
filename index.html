@@ -1580,9 +1580,9 @@ async function callAPI(text, language) {
     showToast("⏳ AI is waking up, this may take 30–60 seconds on first use…", 6000);
   }
   const controller = new AbortController();
-  const timeout    = setTimeout(() => controller.abort(), 90000);
+  const timeout    = setTimeout(() => controller.abort(), 240000);
   try {
-    // Use /fact-check (hybrid pipeline); falls back to /predict if unavailable
+    // Use the evidence verification endpoint.
     const url = FACT_CHECK_URL;
     const res = await fetch(url, {
       method:  "POST",
@@ -1602,7 +1602,6 @@ async function callAPI(text, language) {
   }
 }
 
-// ── MOCK / DEMO MODE ──────────────────────────────────────────────────────
 // ── MAIN CHECK ────────────────────────────────────────────────────────────
 checkBtn.addEventListener("click", async () => {
   const text = textInput.value.trim();
@@ -1667,10 +1666,10 @@ function renderResult(result, text) {
   const methodBadge = document.getElementById("method-badge");
   const methodIcon  = document.getElementById("method-icon");
   const methodLabel = document.getElementById("method-label");
-  if (result.method === "hybrid" || result.method === "hybrid_low_signal") {
+  if (result.method === "web_evidence" || result.method === "hybrid" || result.method === "hybrid_low_signal") {
     methodBadge.className = "method-badge";
     methodIcon.textContent  = result.method === "hybrid_low_signal" ? "🟡" : "🔍";
-    methodLabel.textContent = `Evidence search: ${result.sources_searched} feed(s) checked`;
+    methodLabel.textContent = `Evidence search: ${result.retrieval_stats?.searches_succeeded ?? result.sources_searched} search service(s), ${result.retrieval_stats?.articles_checked ?? 0} pages checked`;
   } else if (result.method === "knowledge_base") {
     methodBadge.className   = "method-badge";
     methodIcon.textContent  = "📚";
