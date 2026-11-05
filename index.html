@@ -1673,7 +1673,7 @@ function renderResult(result, text) {
   if (result.method === "web_evidence" || result.method === "hybrid" || result.method === "hybrid_low_signal") {
     methodBadge.className = "method-badge";
     methodIcon.textContent  = result.method === "hybrid_low_signal" ? "🟡" : "🔍";
-    methodLabel.textContent = `Evidence search: ${result.retrieval_stats?.searches_succeeded ?? result.sources_searched} search service(s), ${result.retrieval_stats?.articles_checked ?? 0} pages checked`;
+    methodLabel.textContent = `Evidence search: ${result.retrieval_stats?.searches_succeeded ?? result.sources_searched} search service(s), ${result.retrieval_stats?.feeds_searched ?? 0} feed(s) available, ${result.retrieval_stats?.articles_checked ?? 0} pages checked`;
   } else if (result.method === "knowledge_base") {
     methodBadge.className   = "method-badge";
     methodIcon.textContent  = "📚";
@@ -1689,6 +1689,12 @@ function renderResult(result, text) {
   let reasonNode = document.getElementById("decision-reason");
   if (!reasonNode) { reasonNode = document.createElement("p"); reasonNode.id = "decision-reason"; verdictCard.appendChild(reasonNode); }
   reasonNode.textContent = (result.reason || "No decision explanation supplied.").replace(/\s*Classifier scores are not probabilities that a claim is true or false\./g, "").replace(/\s*The classifier score is not a probability that the claim is true or false\./g, "");
+  let statusNode = document.getElementById("search-status");
+  if (!statusNode) { statusNode = document.createElement("p"); statusNode.id = "search-status"; verdictCard.appendChild(statusNode); }
+  const services = result.retrieval_stats?.services || {};
+  const serviceNames = {web:"Web search", wikipedia:"Wikipedia search", gdelt:"GDELT news search", punch_feed:"PUNCH feed", premium_feed:"Premium Times feed"};
+  const failed = Object.entries(services).filter(([,state]) => state === "unavailable").map(([name]) => serviceNames[name] || "A search service");
+  statusNode.textContent = failed.length ? `Unavailable during this check: ${failed.join(", ")}. Results may be incomplete.` : "";
 
   // Evidence cards
   const evidenceSection = document.getElementById("evidence-section");
